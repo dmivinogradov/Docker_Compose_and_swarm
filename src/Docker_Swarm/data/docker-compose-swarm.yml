@@ -1,0 +1,196 @@
+version: '3.8'
+
+x-db_env: &db_env
+  POSTGRES_HOST: database
+  POSTGRES_PORT: 5432
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres       
+
+x-rabbitmq_env: &rabbitmq_env       
+  RABBIT_MQ_HOST: rabbitmq
+  RABBIT_MQ_PORT: 5672
+  RABBIT_MQ_USER: guest
+  RABBIT_MQ_PASSWORD: guest
+  RABBIT_MQ_QUEUE_NAME: hotel_queue 
+  RABBIT_MQ_EXCHANGE: hotel_exchange
+
+x-service-deploy: &service_deploy   
+  mode: replicated
+  replicas: 2
+  restart_policy:
+    condition: on-failure
+    delay: 10s
+    max_attempts: 5
+  update_config:
+    parallelism: 1
+    delay: 10s
+    order: start-first
+
+services:
+  nginx:
+    image: nginx:alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+    ports:
+      - "80:80"
+      - "8081:8081"
+      - "8087:8087"
+    volumes:
+      - /home/vagrant/data/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  payment-service:
+    image: barristi/hotel-servise_payment-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: *db_env
+      POSTGRES_DB: payments_db
+      PAYMENT_SERVICE_PORT: 8084
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8084/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  loyalty-service:
+    image: barristi/hotel-servise_loyalty-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: *db_env
+      POSTGRES_DB: balances_db
+      LOYALTY_SERVICE_PORT: 8085
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8085 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 160s
+
+  hotel-service:
+    image: barristi/hotel-servise_hotel-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: *db_env
+      POSTGRES_DB: hotels_db
+      POSTGRES_DB_HOTELS: users_db
+      HOTEL_SERVICE_PORT: 8082
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  booking-service:
+    image: barristi/hotel-servise_booking-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: [ *db_env, *rabbitmq_env ]
+      POSTGRES_DB: reservations_db
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+      BOOKING_SERVICE_PORT: 8083
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 160s
+
+  session-service:
+    image: barristi/hotel-servise_session_service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: *db_env
+      POSTGRES_DB: users_db
+      SESSION_SERVICE_PORT: 8081
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  report-service:
+    image: barristi/hotel-servise_report-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      <<: [*db_env, *rabbitmq_env ]
+      POSTGRES_DB: statistics_db
+      REPORT_SERVICE_PORT: 8086
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8086 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  gateway-service:
+    image: barristi/hotel-servise_gateway-service:1.0.0.0
+    deploy:
+      <<: *service_deploy
+    environment:
+      SESSION_SERVICE_HOST: session-service
+      SESSION_SERVICE_PORT: 8081
+      HOTEL_SERVICE_HOST: hotel-service
+      HOTEL_SERVICE_PORT: 8082
+      BOOKING_SERVICE_HOST: booking-service
+      BOOKING_SERVICE_PORT: 8083
+      PAYMENT_SERVICE_HOST: payment-service
+      PAYMENT_SERVICE_PORT: 8084
+      LOYALTY_SERVICE_HOST: loyalty-service
+      LOYALTY_SERVICE_PORT: 8085
+      REPORT_SERVICE_HOST: report-service
+      REPORT_SERVICE_PORT: 8086
+      GATEWAY_SERVICE_PORT: 8087
+    networks:
+      - hotel_service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8087/ || exit 0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 160s
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  hotel_service:
+    driver: overlay
+    attachable: true

@@ -1,0 +1,40 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+hosts = {
+  "manager01" => "192.168.10.10",
+  "worker01"  => "192.168.10.11",
+  "worker02"  => "192.168.10.12"
+}
+
+ENV['VAGRANT_SERVER_URL'] = 'https://vagrant.elab.pro'
+
+Vagrant.configure("2") do |config|
+
+  config.vm.box = "bento/ubuntu-24.04"
+  config.vm.provider "virtualbox" do |vb|
+    vb.gui = false
+    vb.memory = "2048"
+    vb.cpus = 2
+  end
+
+  hosts.each do |name, ip|
+    config.vm.define name do |node|
+      node.vm.hostname = name
+      node.vm.network "private_network", ip: ip
+      
+      if name == "manager01"
+        node.vm.network "forwarded_port", guest: 8081, host: 8081
+        node.vm.network "forwarded_port", guest: 8087, host: 8087
+        node.vm.network "forwarded_port", guest: 80, host: 8080
+        node.vm.network "forwarded_port", guest: 9443, host: 9443
+      end
+
+      node.vm.provision "file", source: "./data", destination: "/home/vagrant/", run: "always"
+      node.vm.provision "shell", inline: <<-SHELL
+        chmod +x /home/vagrant/data/provision.sh
+        /home/vagrant/data/provision.sh
+      SHELL
+    end
+  end  
+end

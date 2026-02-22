@@ -1,0 +1,219 @@
+
+services:
+  database:
+    image: barristi/hotel-servise_database:1.0.0
+    container_name: database
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - 5434:${POSTGRES_PORT}
+    networks:
+      - hotel_service
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+     
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq
+    environment:
+      - RABBIT_MQ_USER=${RABBIT_MQ_USER}
+      - RABBIT_MQ_PASSWORD=${RABBIT_MQ_PASSWORD}
+    networks:
+      - hotel_service
+    ports:
+      - ${RABBIT_MQ_PORT}:${RABBIT_MQ_PORT}
+      - ${RABBIT_MQ_PORT_MANAGEMENT}:${RABBIT_MQ_PORT_MANAGEMENT}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  payment-service:
+    build:
+      context: "./services/payment-service"
+    container_name: payment-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_PAYMENTS}
+    networks:
+      - hotel_service
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+
+  loyalty-service:
+    build:
+      context: "./services/loyalty-service"
+    container_name: loyalty-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_BALANCES}
+    networks:
+      - hotel_service
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+ 
+  hotel-service:
+    build:
+      context: "./services/hotel-service"
+    container_name: hotel-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_HOTELS}
+    networks:
+      - hotel_service
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+
+  booking-service:
+    build: 
+      context: "./services/booking-service"
+    container_name: booking-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_RESERVATIONS}
+
+      RABBIT_MQ_HOST: ${RABBIT_MQ_HOST}
+      RABBIT_MQ_PORT: ${RABBIT_MQ_PORT}
+      RABBIT_MQ_USER: ${RABBIT_MQ_USER}
+      RABBIT_MQ_PASSWORD: ${RABBIT_MQ_PASSWORD}
+      RABBIT_MQ_QUEUE_NAME: ${RABBIT_MQ_QUEUE_NAME}
+      RABBIT_MQ_EXCHANGE: ${RABBIT_MQ_EXCHANGE}
+      
+      HOTEL_SERVICE_HOST: ${HOTEL_SERVICE_HOST}
+      HOTEL_SERVICE_PORT: ${HOTEL_SERVICE_PORT}
+      
+      PAYMENT_SERVICE_HOST: ${PAYMENT_SERVICE_HOST}
+      PAYMENT_SERVICE_PORT: ${PAYMENT_SERVICE_PORT}
+      
+      LOYALTY_SERVICE_HOST: ${LOYALTY_SERVICE_HOST}
+      LOYALTY_SERVICE_PORT: ${LOYALTY_SERVICE_PORT}
+    networks:
+      - hotel_service
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      hotel-service:
+        condition: service_healthy
+      loyalty-service:
+        condition: service_healthy
+    restart: unless-stopped
+ 
+  session-service:
+    build:
+      context: "./services/session-service"
+    container_name: session-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_USERS}
+      SESSION_SERVICE_PORT: ${SESSION_SERVICE_PORT}
+    networks:
+      - hotel_service
+    ports:
+      - ${SESSION_SERVICE_PORT}:${SESSION_SERVICE_PORT}
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+ 
+  report-service:
+    build:
+      context: "./services/report-service"
+    container_name: report-service
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_STATISTICS}
+      RABBIT_MQ_HOST: ${RABBIT_MQ_HOST}
+      RABBIT_MQ_PORT: ${RABBIT_MQ_PORT}
+      RABBIT_MQ_USER: ${RABBIT_MQ_USER}
+      RABBIT_MQ_PASSWORD: ${RABBIT_MQ_PASSWORD}
+      RABBIT_MQ_QUEUE_NAME: ${RABBIT_MQ_QUEUE_NAME}
+      RABBIT_MQ_EXCHANGE: ${RABBIT_MQ_EXCHANGE}
+    networks:
+      - hotel_service
+    depends_on:
+      database:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway-service:
+    build:
+      context: "./services/gateway-service"
+    container_name: gateway-service
+    environment:
+      SESSION_SERVICE_HOST: ${SESSION_SERVICE_HOST}
+      SESSION_SERVICE_PORT: ${SESSION_SERVICE_PORT}
+      HOTEL_SERVICE_HOST: ${HOTEL_SERVICE_HOST}
+      HOTEL_SERVICE_PORT: ${HOTEL_SERVICE_PORT}
+      BOOKING_SERVICE_HOST: ${BOOKING_SERVICE_HOST}
+      BOOKING_SERVICE_PORT: ${BOOKING_SERVICE_PORT}
+      PAYMENT_SERVICE_HOST: ${PAYMENT_SERVICE_HOST}
+      PAYMENT_SERVICE_PORT: ${PAYMENT_SERVICE_PORT}
+      LOYALTY_SERVICE_HOST: ${LOYALTY_SERVICE_HOST}
+      LOYALTY_SERVICE_PORT: ${LOYALTY_SERVICE_PORT}
+      REPORT_SERVICE_HOST: ${REPORT_SERVICE_HOST}
+      REPORT_SERVICE_PORT: ${REPORT_SERVICE_PORT}
+      GATEWAY_SERVICE_PORT: ${GATEWAY_SERVICE_PORT}
+    networks:
+      - hotel_service
+    ports:
+      - ${GATEWAY_SERVICE_PORT}:${GATEWAY_SERVICE_PORT}
+    depends_on:
+      booking-service:
+        condition: service_healthy
+      session-service:
+        condition: service_healthy
+      hotel-service:
+        condition: service_healthy
+      loyalty-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      report-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+networks:
+  hotel_service:
+    name: hotel_service
+    driver: bridge
+    external: true
